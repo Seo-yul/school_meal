@@ -1,28 +1,5 @@
 import requests
 import urllib
-import datetime
-
-class SchoolMeal():
-    # url = 'https://open.neis.go.kr/hub/mealServiceDietInfo?'
-    # key_KEY = '8d8e6417cf5e45af8e732d993d5cfef6'
-    # key_Type = 'json'
-    # key_pIndex = 1
-    # key_pSize = 1
-    # key_ATPT_OFCDC_SC_CODE = 'B10'
-    # key_SD_SCHUL_CODE = 7010057
-    # key_MMEAL_SC_CODE =
-    # key_MLSV_YMD = 20191028
-    # key_MLSV_FROM_YMD =
-    # MLSV_TO_YMD =
-
-
-    # res = requests.get(gugun_url, headers=res_headers, verify=False)
-    # res = requests.get('https://open.neis.go.kr/hub/mealServiceDietInfo?KEY=8d8e6417cf5e45af8e732d993d5cfef6&Type=json&pIndex=1&pSize=1&ATPT_OFCDC_SC_CODE=B10&SD_SCHUL_CODE=7010057&MLSV_YMD=20191028')
-    # html = res.json()
-    # print(type(html))
-    # html = res.text
-    # soup = BeautifulSoup(html, 'html.parser')
-    pass
 
 class SchoolInfo(object):
     url = 'https://open.neis.go.kr/hub/schoolInfo?'
@@ -90,7 +67,7 @@ class SchoolInfo(object):
 class MealInfo(object):
     url = 'https://open.neis.go.kr/hub/mealServiceDietInfo?'
 
-    def __init__(self, atpt_ofcdc_sc_code, sd_schul_code, mlsv_from_ymd, mlsv_to_ymd):
+    def __init__(self, atpt_ofcdc_sc_code, sd_schul_code, ymd):
         self.meal_data_list = []
         self.query_string = {
             'KEY': '8d8e6417cf5e45af8e732d993d5cfef6',
@@ -99,8 +76,8 @@ class MealInfo(object):
             'pSize': 50,
             'ATPT_OFCDC_SC_CODE': atpt_ofcdc_sc_code,
             'SD_SCHUL_CODE': sd_schul_code,
-            'MLSV_FROM_YMD': mlsv_from_ymd,
-            'MLSV_TO_YMD': mlsv_to_ymd
+            'MLSV_FROM_YMD': ymd,
+            'MLSV_TO_YMD': ymd
         }
 
     def call_data(self) -> bool:

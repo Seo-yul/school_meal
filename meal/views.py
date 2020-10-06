@@ -1,11 +1,11 @@
 from django.shortcuts import render
-from concurrent.futures import ThreadPoolExecutor
 from django.http import HttpResponse
+
+from concurrent.futures import ThreadPoolExecutor
 from meal.api.openAPI import SchoolInfo, MealInfo
 from meal.DBmanager import School_Info_DB, BASED_INFO, USER_INFO
 import threading
 import json
-import requests
 import datetime
 
 school_data_list = list()
@@ -18,7 +18,7 @@ TOMORROW = str(datetime.date.today()+datetime.timedelta(days=1)).replace('-', ''
 NEXT_WEEK = str(datetime.date.today()+datetime.timedelta(days=7)).replace('-', '')
 
 
-def init_database():
+def init_database(request):
     '''
     작성 : 서율
     기능 : 최초 데이터 초기화
@@ -37,6 +37,23 @@ def init_database():
     }
     BASED_INFO.add_based_info_to_collection(data_dict)
     BASED_INFO.add_based_info_to_collection(last_date)
+
+    msg = 'init end'
+
+    result = {
+        "version": "2.0",
+        "data": {
+            'msg': '{}'.format(msg)
+        }
+    }
+    print(msg)
+    return {
+        'statusCode': 200,
+        'body': result,
+        'headers': {
+            'Access-Control-Allow-Origin': '*',
+        },
+    }
 
 
 def init_data():
@@ -61,7 +78,7 @@ def init_data():
     db_cursor = BASED_INFO.get_based_info_from_collection(sql_query_0, sql_query_1)
     LAST_UPDATE_DATE = dict(list(db_cursor)[0])['last_date']
 
-
+#######################################################################
 def fetch_school_data(atpt_ofcdc_sc_code):
     '''
     작성 : 윤서율
@@ -107,24 +124,144 @@ def school_data_init():
         sql_query_0 = {'last_date': LAST_UPDATE_DATE}
         sql_query_1 = {'$set': {'last_date': TODAY}}
         BASED_INFO.update_based_info_to_collection(sql_query_0, sql_query_1)
+########################################################################################
+
+def get_user_info(user_id):
+    '''
+    작성 : 서율
+    기능 : 유저 데이터 가져오기
+    '''
+    sql_query_0 = {'user_id': user_id}
+    sql_query_1 = {'_id':0}
+
+    result_dict = USER_INFO.get_user_info_from_collection(sql_query_0, sql_query_1)
+    return result_dict
 
 
-def get_local_school_list(atpt_ofcdc_sc_code) -> list:
+def get_local_school_list(atpt_ofcdc_sc_code, schul_nm) -> list:
     '''
     작성 : 서율
     기능 : 교육청에 따른 학교 정보 가져오는 함수
     atpt_ofcdc_sc_code : 교육청 코드
-    return : data_list 지역의 학교 정보 전부 리스트
+    schul_nm : 학교이름
+    return : data_list 지역의 학교 정보
     '''
     sql_query_0 = {'ATPT_OFCDC_SC_CODE': atpt_ofcdc_sc_code, 'UPDATE_DATE': LAST_UPDATE_DATE}
     sql_query_1 = {'_id': 0, 'ATPT_OFCDC_SC_CODE': 0, 'UPDATE_DATE': 0}
     db_cursor = School_Info_DB.get_school_info_from_collection(sql_query_0, sql_query_1)
     db_dict = list(db_cursor)[0]
-    data_list = db_dict['DATA']
+    data_list = [data for data in db_dict['DATA'] if data['SCHUL_NM'] == schul_nm]
     return data_list
 
 
-def meal_data_init(atpt_ofcdc_sc_code, code) -> list:
+def update_user_sd_schul(request):
+    '''
+    작성 : 서율
+    기능 : 유저 학교 이름과 코드 등록, 수정
+    user_id : 챗봇 유저 아이디
+    user_select_sch_name : 학교 이름
+    user_select_sch_code : 학교 코드
+    '''
+    request_body = json.loads(request.body)
+
+    msg = ''
+    try:
+        user_id = request_body['userRequest']['user']['id']
+        params = request_body['action']['params']
+        schul_nm = params['schul_nm']
+
+        user_info_dict = list(get_user_info(user_id))[0]
+        atpt_ofcdc_sc_code = user_info_dict['ATPT_OFCDC_SC_CODE']
+
+        sc_data_list = (get_local_school_list(atpt_ofcdc_sc_code, schul_nm))[0]
+
+        sd_schul_code = sc_data_list['SD_SCHUL_CODE']
+
+        sql_query_0 = {'user_id': user_id}
+        sql_query_1 = {'$set': {'SCHUL_NM': schul_nm, 'SD_SCHUL_CODE': sd_schul_code}}
+        result = USER_INFO.update_user_info_to_collection(sql_query_0, sql_query_1)
+
+        if not result.modified_count:
+            sql_query = {
+                'user_id': user_id,
+                'SCHUL_NM': schul_nm,
+                'SD_SCHUL_CODE': sd_schul_code
+            }
+            USER_INFO.add_user_info_to_collection(sql_query)
+        msg = schul_nm
+
+    except:
+        msg = '지역등록과 학교등록을 확인해주시기 바랍니다.'
+
+    result = {
+        "version": "2.0",
+        "data": {
+            'msg': '{}'.format(msg)
+        }
+    }
+
+    return {
+        'statusCode': 200,
+        'body': result,
+        'headers': {
+            'Access-Control-Allow-Origin': '*',
+        },
+    }
+
+
+def update_user_atpt_ofcdc_sc(request):
+    '''
+    작성 : 서율
+    기능 : 유저 지역 이름 등록, 수정
+    처음 등록이라면 디비에 등록, 아니라면 수정
+    user_id : 챗봇 유저 아이디
+    atpt_ofcdc_sc_name : 지역명
+    '''
+
+    event = json.loads(request.body)
+
+    msg = ''
+    try:
+        user_id = event['userRequest']['user']['id']
+        params = event['action']['params']
+        atpt_ofcdc_sc_name = params['atpt_ofcdc_sc_name']
+
+        index = ATPT_OFCDC_SC_NAME_LIST.index(atpt_ofcdc_sc_name)
+
+        sql_query_0 = {'user_id': user_id}
+        sql_query_1 = {'$set': {'ATPT_OFCDC_SC_NAME': atpt_ofcdc_sc_name, 'ATPT_OFCDC_SC_CODE':ATPT_OFCDC_SC_CODE_LIST[index]}}
+        print('변경: ', ATPT_OFCDC_SC_CODE_LIST[index])
+        result = USER_INFO.update_user_info_to_collection(sql_query_0, sql_query_1)
+
+        if not result.modified_count:
+            sql_query = {
+                'user_id': user_id,
+                'ATPT_OFCDC_SC_NAME': atpt_ofcdc_sc_name,
+                'ATPT_OFCDC_SC_CODE': ATPT_OFCDC_SC_CODE_LIST[index]
+            }
+            USER_INFO.add_user_info_to_collection(sql_query)
+            print('새로 추가')
+
+    except:
+        msg = '지역등록과 학교등록을 확인해주시기 바랍니다.'
+
+    result = {
+        "version": "2.0",
+        "data": {
+            'msg': '{}'.format(msg)
+        }
+    }
+
+    return {
+        'statusCode': 200,
+        'body': result,
+        'headers': {
+            'Access-Control-Allow-Origin': '*',
+        },
+    }
+
+
+def call_meal_data(request) -> list:
     '''
     작성 : 서율
     기능 : 교육청 코드와 학교 코드로 MealInfo 객체를 만들어 급식 내용을 가져오는 API 호출한다.
@@ -132,116 +269,64 @@ def meal_data_init(atpt_ofcdc_sc_code, code) -> list:
     code : 학교 코드
     return : 급식 일주일 list
     '''
-    mi = MealInfo(atpt_ofcdc_sc_code, code, TODAY, NEXT_WEEK)
-    check = mi.call_data()
-    if check:
-        return mi.get_meal_data_list()
+    event = json.loads(request.body)
+
+    msg = ''
+    user_id = event['userRequest']['user']['id']
+    params = event['action']['params']
+    target_day = params['target_day']
+
+    if target_day == '오늘':
+        target_day = TODAY
+    elif target_day == '내일':
+        target_day = str(datetime.date.today()+datetime.timedelta(days=1)).replace('-', '')
+    elif target_day == '모레':
+        target_day = str(datetime.date.today()+datetime.timedelta(days=2)).replace('-', '')
     else:
-        return None
+        target_day = str(datetime.date.today()+datetime.timedelta(days=3)).replace('-', '')
 
+    try:
+        user_info_dict = list(get_user_info(user_id))[0]
+        atpt_ofcdc_sc_code = user_info_dict['ATPT_OFCDC_SC_CODE']
+        sd_schul_code = user_info_dict['SD_SCHUL_CODE']
 
-def get_meal_data():
-    '''
-    작성 : 윤서율
-    기능 : 만들어진 학교 정보 딕셔너리를 디비에 추가
-    '''
+        mi = MealInfo(atpt_ofcdc_sc_code, sd_schul_code, target_day)
+        check = mi.call_data()
+        meal_list = mi.get_meal_data_list()
+        print(meal_list)
 
-    # print('Thread Name :', threading.current_thread().getName(), 'Start', atpt_ofcdc_sc_code)
-    # MEAL_INFO_B10.add_meal_info_to_collection(data)
-    # print('Thread Name :', threading.current_thread().getName(), 'Done', atpt_ofcdc_sc_code)
+        for data in meal_list:
+            msg += data['MMEAL_SC_NM']+'<br/>'
+            msg += data['DDISH_NM']
+    except:
+        msg = '식단정보가 없습니다.'
 
-
-def sss():
-    '''
-    작성 : 윤서율
-    기능 : 급식 정보를 만들고 데이터베이스에 넣는 함수를 비동기 콜
-    '''
-    # with ThreadPoolExecutor() as executor:
-    #     for code in ATPT_OFCDC_SC_CODE_LIST:
-    #         executor.submit(fetch_meal_data, code)
-
-    # with ThreadPoolExecutor() as executor:
-    #    for data_dict in zip(school_data_list, ATPT_OFCDC_SC_CODE):
-    #        executor.submit(push_meal_data_db, data_dict)
-
-    # sql_query_0 = {'last_date': LAST_UPDATE_DATE}
-    # sql_query_1 = {'$set': {'last_date': TODAY}}
-    # BASED_INFO.update_based_info_to_collection(sql_query_0, sql_query_1)
-
-
-def set_user_atpt_ofcdc_sc_code(user_select, user_id):
-    '''
-    작성 : 서율
-    기능 : 학교정보 신규등록 - 지역등록
-    user_select : 선택한 학교이름
-    user_id : 유저 아이디
-    '''
-    if user_select in ATPT_OFCDC_SC_NAME_LIST:
-        index = ATPT_OFCDC_SC_NAME_LIST.index(user_select)
-        atpt_ofcdc_sc_code = ATPT_OFCDC_SC_CODE_LIST[index]
-        sql_query_0 = {'user_id': user_id, 'ATPT_OFCDC_SC_CODE': atpt_ofcdc_sc_code}
-        USER_INFO.add_user_info_to_collection(sql_query_0)
-        return True
-    else:
-        return False
-
-def update_user_sd_schul_code(user_id, user_select_sch_name, user_select_sch_code):
-    '''
-    작성 : 서율
-    기능 : 
-    user_id : 유저 아이디
-    user_select_sch_name : 유저 선택 학교 이름
-    user_select_sch_code : 유저 선택 학교 코드
-    '''
-    sql_query_0 = {'user_id': user_id}
-    sql_query_1 = {'$set': {'SCHUL_NM': user_select_sch_name, 'SD_SCHUL_CODE': user_select_sch_code}}
-    USER_INFO.update_user_info_to_collection(sql_query_0, sql_query_1)
-
-
-
-def new_database():
-    init_database() # 데이터베이스 초기값 세팅
-
-
-def send_api(request):
-    init_data() # 전역 변수 초기화 필수
-
-
-
-    request_body = json.loads(request.body)
-
-    print(request_body)
-
-    user_id = request_body['intent']['id']
-    params = request_body['action']['params']
-    atpt_ofcdc_sc_name = params['atpt_ofcdc_sc_name']
+    print(msg)
     result = {
         "version": "2.0",
         "data": {
-            "user_id": user_id,
-            "atpt_ofcdc_sc_name": atpt_ofcdc_sc_name
+            'msg': '{}'.format(msg)
         }
     }
-
-
-    # school_data_init() # 학교 데이터 디비 세팅 한달에 한번?
-
-
-    # meal_data_init() # 급식 데이터 디비 세팅
-    # set_user_atpt_ofcdc_sc_code() # 학교 지역 등록
-
-    res = {
+    return {
         'statusCode': 200,
-        'body': json.dumps(result)
+        'body': result,
+        'headers': {
+            'Access-Control-Allow-Origin': '*',
+        },
     }
 
+def send_api(request):
+    # res = init_database(request)
+    init_data()  # 전역 변수 초기화 필수
 
-    user_id = 'kim' # 유저
-    user_select_sch_name = '가좌고등학교'
-    user_select_sch_code = '000'
-    # update_user_sd_schul_code(user_id, user_select_sch_name, user_select_sch_code) # 학교 등록
 
-    # data
-    # context ={'aa':'k'}
+    res = 'gg'
+    res = update_user_atpt_ofcdc_sc(request) # 지역등록
+    # res = update_user_sd_schul(request) # 학교등록
+    # res = call_meal_data(request) # 급식 검색
+
+    # school_data_init() # 학교 데이터 디비 세팅 한달에 한번?
+        
+
     return HttpResponse(json.dumps(res))
-    # return HttpResponse([send_json_data], content_type="application/json; charset=utf-8")
